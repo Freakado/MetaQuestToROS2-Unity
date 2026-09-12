@@ -3,11 +3,11 @@ using Unity.Robotics.ROSTCPConnector;
 // We need these message types for Twist
 using RosMessageTypes.Geometry;
 
-public class VRRobotController : MonoBehaviour
+public class RosTwistPublisher : MonoBehaviour
 {
     // --- ROS Settings ---
     private ROSConnection ros;
-    public string topicName = "/cmd_vel"; // The standard topic for velocity commands
+    public string topicName = "/JeffCreate3/cmd_vel"; // The standard topic for velocity commands
 
     // --- Control Tuning ---
     [Header("Tuning")]
