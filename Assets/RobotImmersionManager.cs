@@ -14,7 +14,7 @@ public class RobotImmersionManager : MonoBehaviour
         InRobot     // Blackout background + zoomed/immersive FPV quad
     }
 
-    [Header("ROS Connection Configuration")]]
+    [Header("ROS Connection Configuration")]
     public ROSConnection RosConnection_video;
     public ROSConnection RosConnection_general;
 
