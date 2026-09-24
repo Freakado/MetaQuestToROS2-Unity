@@ -6,8 +6,8 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
-    path: Assets/Scenes/ROSSkyboxApproach.unity
-    guid: 7c510b490c824d54994c09c51a09fc46
+    path: Assets/Scenes/ROsSupervisionHUD.unity
+    guid: a7ef7cdf3dbcf354d8fa6fd29a256f2c
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
     com.unity.xr.management.loader_settings: {fileID: 11400000, guid: dd9d46d880f58504f98f7ec01bf18af6, type: 2}
