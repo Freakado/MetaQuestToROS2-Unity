@@ -284,6 +284,9 @@ PrefabInstance:
     - targetCorrespondingSourceObject: {fileID: 134650, guid: ce816f2e6abb0504092c23ed9b970dfd, type: 3}
       insertIndex: -1
       addedObject: {fileID: 120840998}
+    - targetCorrespondingSourceObject: {fileID: 134650, guid: ce816f2e6abb0504092c23ed9b970dfd, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 120841000}
   m_SourcePrefab: {fileID: 100100000, guid: ce816f2e6abb0504092c23ed9b970dfd, type: 3}
 --- !u!4 &11962341 stripped
 Transform:
@@ -714,6 +717,7 @@ MonoBehaviour:
   normalColor: {r: 0.2, g: 0.7, b: 1, a: 0.6}
   hoverColor: {r: 0.1, g: 1, b: 0.4, a: 0.9}
   clickColor: {r: 1, g: 1, b: 1, a: 1}
+  dragThresholdMeters: 0.035
   uiCamera: {fileID: 0}
 --- !u!120 &120840999
 LineRenderer:
@@ -825,6 +829,21 @@ LineRenderer:
   m_UseWorldSpace: 1
   m_Loop: 0
   m_ApplyActiveColorSpace: 1
+--- !u!114 &120841000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 11962343}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 76c392e42b5098c458856cdf6ecaaaa1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.EventSystems.EventSystem
+  m_FirstSelected: {fileID: 0}
+  m_sendNavigationEvents: 1
+  m_DragThreshold: 10
 --- !u!1 &155686614
 GameObject:
   m_ObjectHideFlags: 0
@@ -2057,12 +2076,12 @@ GameObject:
   - component: {fileID: 557949209}
   - component: {fileID: 557949208}
   - component: {fileID: 557949207}
-  - component: {fileID: 557949210}
   - component: {fileID: 557949211}
   - component: {fileID: 557949212}
   - component: {fileID: 557949213}
   - component: {fileID: 557949215}
   - component: {fileID: 557949214}
+  - component: {fileID: 557949216}
   m_Layer: 0
   m_Name: ROSConnection_control
   m_TagString: Untagged
@@ -2085,9 +2104,9 @@ MonoBehaviour:
   m_RosIPAddress: 192.168.1.100
   m_RosPort: 10000
   m_ConnectOnStart: 1
-  m_KeepaliveTime: 1
-  m_NetworkTimeoutSeconds: 2
-  m_SleepTimeSeconds: 0.01
+  m_KeepaliveTime: 2
+  m_NetworkTimeoutSeconds: 1
+  m_SleepTimeSeconds: 0
   m_ShowHUD: 1
   m_TFTopics:
   - /JeffCreate3/tf
@@ -2184,24 +2203,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a2853af81de8e7840abefa6fbaef9db9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RosConnectionManager
---- !u!114 &557949210
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 557949201}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fc92c45f8f0933e478f1dc5dc169660a, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::RVizCockpitPanel
-  controlConnection: {fileID: 557949202}
-  mapTopic: /JeffCreate3/map
-  odomTopic: /JeffCreate3/odom
-  markerArrayTopic: /JeffCreate3/discovered_artifact_array
-  mapRenderer: {fileID: 1570823982}
-  hudStatusText: {fileID: 548779126}
 --- !u!114 &557949211
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2315,6 +2316,7 @@ MonoBehaviour:
   normalColor: {r: 0.2, g: 0.7, b: 1, a: 0.6}
   hoverColor: {r: 0.1, g: 1, b: 0.4, a: 0.9}
   clickColor: {r: 1, g: 1, b: 1, a: 1}
+  dragThresholdMeters: 0.035
   uiCamera: {fileID: 11962345}
 --- !u!120 &557949215
 LineRenderer:
@@ -2426,6 +2428,21 @@ LineRenderer:
   m_UseWorldSpace: 1
   m_Loop: 0
   m_ApplyActiveColorSpace: 1
+--- !u!114 &557949216
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 557949201}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 76c392e42b5098c458856cdf6ecaaaa1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.EventSystems.EventSystem
+  m_FirstSelected: {fileID: 0}
+  m_sendNavigationEvents: 1
+  m_DragThreshold: 10
 --- !u!1001 &560116732
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -4058,6 +4075,10 @@ PrefabInstance:
       value: 20
       objectReference: {fileID: 0}
     - target: {fileID: 915038437358523951, guid: 87757dd65e016f745bf157925a49cf0a, type: 3}
+      propertyPath: m_Navigation.m_Mode
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 915038437358523951, guid: 87757dd65e016f745bf157925a49cf0a, type: 3}
       propertyPath: m_Colors.m_HighlightedColor.b
       value: 0.592
       objectReference: {fileID: 0}
@@ -4653,7 +4674,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &968947469
 RectTransform:
   m_ObjectHideFlags: 0
@@ -5755,8 +5776,8 @@ MonoBehaviour:
   m_RosIPAddress: 192.168.1.100
   m_RosPort: 10001
   m_ConnectOnStart: 1
-  m_KeepaliveTime: 1
-  m_NetworkTimeoutSeconds: 2
+  m_KeepaliveTime: 2
+  m_NetworkTimeoutSeconds: 1
   m_SleepTimeSeconds: 0
   m_ShowHUD: 1
   m_TFTopics:
@@ -7142,6 +7163,7 @@ GameObject:
   - component: {fileID: 1570823981}
   - component: {fileID: 1570823980}
   - component: {fileID: 1570823979}
+  - component: {fileID: 1570823984}
   m_Layer: 5
   m_Name: RobotMapScreen
   m_TagString: Untagged
@@ -7368,6 +7390,24 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1570823977}
   m_Mesh: {fileID: 10210, guid: 0000000000000000e000000000000000, type: 0}
+--- !u!114 &1570823984
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1570823977}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fc92c45f8f0933e478f1dc5dc169660a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::RVizCockpitPanel
+  controlConnection: {fileID: 557949202}
+  mapTopic: /JeffCreate3/map
+  odomTopic: /JeffCreate3/odom
+  markerArrayTopic: /JeffCreate3/discovered_artifact_array
+  mapRenderer: {fileID: 1570823982}
+  hudStatusText: {fileID: 548779126}
 --- !u!1 &1587141664
 GameObject:
   m_ObjectHideFlags: 0
@@ -8222,6 +8262,22 @@ PrefabInstance:
     - target: {fileID: 815378456595397864, guid: 87757dd65e016f745bf157925a49cf0a, type: 3}
       propertyPath: m_FontData.m_FontSize
       value: 20
+      objectReference: {fileID: 0}
+    - target: {fileID: 915038437358523951, guid: 87757dd65e016f745bf157925a49cf0a, type: 3}
+      propertyPath: m_Navigation.m_Mode
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 915038437358523951, guid: 87757dd65e016f745bf157925a49cf0a, type: 3}
+      propertyPath: m_Colors.m_SelectedColor.b
+      value: 0.52812386
+      objectReference: {fileID: 0}
+    - target: {fileID: 915038437358523951, guid: 87757dd65e016f745bf157925a49cf0a, type: 3}
+      propertyPath: m_Colors.m_SelectedColor.g
+      value: 0.52812386
+      objectReference: {fileID: 0}
+    - target: {fileID: 915038437358523951, guid: 87757dd65e016f745bf157925a49cf0a, type: 3}
+      propertyPath: m_Colors.m_SelectedColor.r
+      value: 0.8679245
       objectReference: {fileID: 0}
     - target: {fileID: 915038437358523951, guid: 87757dd65e016f745bf157925a49cf0a, type: 3}
       propertyPath: m_Colors.m_HighlightedColor.b

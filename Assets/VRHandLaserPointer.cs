@@ -36,11 +36,16 @@ public class VRHandLaserPointer : MonoBehaviour
     private Canvas[] worldCanvases;
     public Camera uiCamera;
 
-    // Drag & State tracking for ScrollRect
+    // Interaction tracking
+    private GameObject currentPressedObject = null;
     private GameObject currentDraggedObject = null;
     private GameObject currentHoveredObject = null;
     private PointerEventData currentPointerData = null;
+    private Vector2 lastScreenPos = Vector2.zero;
     private bool isDragging = false;
+    
+    // Pixel travel needed before turning a click into a scroll drag
+    public float dragThresholdPixels = 12.0f;
 
     void Awake()
     {
@@ -81,10 +86,7 @@ public class VRHandLaserPointer : MonoBehaviour
         RefreshCanvases();
     }
 
-    void OnEnable()
-    {
-        RefreshCanvases();
-    }
+    void OnEnable() => RefreshCanvases();
 
     public void RefreshCanvases()
     {
@@ -110,19 +112,29 @@ public class VRHandLaserPointer : MonoBehaviour
         SetLaserVisible(true);
         Ray ray = new Ray(originTransform.position, originTransform.forward);
 
-        // Input Detection (Trigger / Pinch / Mouse)
+        // Input
         bool triggerPressed = OVRInput.Get(clickButton, controller) || DetectOpticalPinchHeld() || Input.GetMouseButton(0);
         bool triggerDown = OVRInput.GetDown(clickButton, controller) || DetectOpticalPinchDown() || Input.GetMouseButtonDown(0);
         bool triggerUp = OVRInput.GetUp(clickButton, controller) || DetectOpticalPinchUp() || Input.GetMouseButtonUp(0);
 
-        // 1. Physics Hit (e.g., Colliders)
+        // 1. Physics Hit Check
         bool hasPhysicsHit = Physics.Raycast(ray, out RaycastHit physicsHit, maxDistance, targetLayers);
         float closestDistance = hasPhysicsHit ? physicsHit.distance : maxDistance;
         Vector3 hitPoint = hasPhysicsHit ? physicsHit.point : ray.GetPoint(maxDistance);
         Vector3 hitNormal = hasPhysicsHit ? physicsHit.normal : -ray.direction;
 
-        // 2. UI Raycast
+        // 2. UI Raycast Check
         GameObject hitUIObject = null;
+        RaycastResult topHitResult = default;
+
+        if (currentPointerData == null)
+        {
+            currentPointerData = new PointerEventData(EventSystem.current)
+            {
+                pointerId = 1001
+            };
+        }
+
         if (worldCanvases == null || worldCanvases.Length == 0) RefreshCanvases();
 
         foreach (Canvas canvas in worldCanvases)
@@ -146,9 +158,9 @@ public class VRHandLaserPointer : MonoBehaviour
                 Camera cam = canvas.worldCamera != null ? canvas.worldCamera : uiCamera;
                 Vector2 screenPos = RectTransformUtility.WorldToScreenPoint(cam, candidatePoint);
 
-                PointerEventData ped = new PointerEventData(EventSystem.current) { position = screenPos };
+                PointerEventData tempPed = new PointerEventData(EventSystem.current) { position = screenPos };
                 List<RaycastResult> results = new List<RaycastResult>();
-                gr.Raycast(ped, results);
+                gr.Raycast(tempPed, results);
 
                 if (results.Count > 0)
                 {
@@ -156,8 +168,7 @@ public class VRHandLaserPointer : MonoBehaviour
                     hitPoint = candidatePoint;
                     hitNormal = canvas.transform.forward;
                     hitUIObject = results[0].gameObject;
-                    currentPointerData = ped;
-                    break;
+                    topHitResult = results[0];
                 }
             }
         }
@@ -174,85 +185,154 @@ public class VRHandLaserPointer : MonoBehaviour
             reticleTransform.rotation = Quaternion.LookRotation(hitNormal);
         }
 
-        // 3. UI Event Dispatching (Click, Hover, Drag / Scroll)
-        bool isInteractive = (hitUIObject != null) || hasPhysicsHit;
+        // 3. UI Interactions
+        Camera activeCam = uiCamera;
+        Vector2 currentScreenPos = RectTransformUtility.WorldToScreenPoint(activeCam, hitPoint);
+        
+        currentPointerData.delta = currentScreenPos - lastScreenPos;
+        currentPointerData.position = currentScreenPos;
+        currentPointerData.pointerCurrentRaycast = topHitResult;
+        lastScreenPos = currentScreenPos;
 
-        if (currentPointerData != null)
+        // Hover handling
+        if (hitUIObject != currentHoveredObject && !triggerPressed)
         {
-            Camera cam = uiCamera;
-            currentPointerData.position = RectTransformUtility.WorldToScreenPoint(cam, hitPoint);
+            if (currentHoveredObject != null)
+                ExecuteEvents.Execute(currentHoveredObject, currentPointerData, ExecuteEvents.pointerExitHandler);
 
-            // Handle Pointer Enter / Exit
-            if (hitUIObject != currentHoveredObject)
+            currentHoveredObject = hitUIObject;
+
+            if (currentHoveredObject != null)
+                ExecuteEvents.Execute(currentHoveredObject, currentPointerData, ExecuteEvents.pointerEnterHandler);
+        }
+
+        // Pointer Down
+        if (triggerDown)
+        {
+            isDragging = false;
+            currentPointerData.pressPosition = currentScreenPos;
+            currentPointerData.pointerPressRaycast = topHitResult;
+            currentPointerData.eligibleForClick = true;
+
+            if (hitUIObject != null)
             {
-                if (currentHoveredObject != null)
-                    ExecuteEvents.Execute(currentHoveredObject, currentPointerData, ExecuteEvents.pointerExitHandler);
+                GameObject targetBtn = ExecuteEvents.GetEventHandler<IPointerClickHandler>(hitUIObject);
+                GameObject targetDrag = ExecuteEvents.GetEventHandler<IDragHandler>(hitUIObject);
 
-                currentHoveredObject = hitUIObject;
+                // If on a button inside a scrollview, prioritize button unless scrolled
+                if (targetDrag == null)
+                {
+                    ScrollRect sr = hitUIObject.GetComponentInParent<ScrollRect>();
+                    if (sr != null) targetDrag = sr.gameObject;
+                }
 
-                if (currentHoveredObject != null)
-                    ExecuteEvents.Execute(currentHoveredObject, currentPointerData, ExecuteEvents.pointerEnterHandler);
-            }
-
-            // Pointer Down
-            if (triggerDown && hitUIObject != null)
-            {
-                currentPointerData.pressPosition = currentPointerData.position;
-                currentPointerData.pointerPressRaycast = currentPointerData.pointerCurrentRaycast;
-
-                // Find receiver for PointerDown
-                GameObject target = ExecuteEvents.ExecuteHierarchy(hitUIObject, currentPointerData, ExecuteEvents.pointerDownHandler);
-                if (target == null)
-                    target = ExecuteEvents.GetEventHandler<IPointerClickHandler>(hitUIObject);
-
-                currentPointerData.pointerPress = target;
+                currentPressedObject = targetBtn != null ? targetBtn : hitUIObject;
+                currentPointerData.pointerPress = currentPressedObject;
                 currentPointerData.rawPointerPress = hitUIObject;
 
-                // Initialize Dragging on ScrollRect or Sliders
-                GameObject dragHandler = ExecuteEvents.GetEventHandler<IDragHandler>(hitUIObject);
-                if (dragHandler != null)
+                ExecuteEvents.Execute(currentPressedObject, currentPointerData, ExecuteEvents.pointerDownHandler);
+
+                if (targetDrag != null)
                 {
-                    currentDraggedObject = dragHandler;
+                    currentDraggedObject = targetDrag;
+                    currentPointerData.pointerDrag = targetDrag;
                     ExecuteEvents.Execute(currentDraggedObject, currentPointerData, ExecuteEvents.initializePotentialDrag);
-                    isDragging = false;
-                }
-            }
-
-            // Dragging (ScrollRect move)
-            if (triggerPressed && currentDraggedObject != null)
-            {
-                if (!isDragging)
-                {
-                    ExecuteEvents.Execute(currentDraggedObject, currentPointerData, ExecuteEvents.beginDragHandler);
-                    isDragging = true;
-                }
-                ExecuteEvents.Execute(currentDraggedObject, currentPointerData, ExecuteEvents.dragHandler);
-            }
-
-            // Pointer Up / Click
-            if (triggerUp)
-            {
-                if (isDragging && currentDraggedObject != null)
-                {
-                    ExecuteEvents.Execute(currentDraggedObject, currentPointerData, ExecuteEvents.endDragHandler);
-                    isDragging = false;
-                    currentDraggedObject = null;
-                }
-
-                if (currentPointerData.pointerPress != null)
-                {
-                    ExecuteEvents.Execute(currentPointerData.pointerPress, currentPointerData, ExecuteEvents.pointerUpHandler);
-
-                    GameObject clickTarget = ExecuteEvents.GetEventHandler<IPointerClickHandler>(hitUIObject);
-                    if (clickTarget == currentPointerData.pointerPress)
-                    {
-                        ExecuteEvents.Execute(clickTarget, currentPointerData, ExecuteEvents.pointerClickHandler);
-                    }
-                    currentPointerData.pointerPress = null;
                 }
             }
         }
 
+        // Dragging & Scrolling (Only if we actually pressed something scrollable)
+        if (triggerPressed && currentDraggedObject != null)
+        {
+            float dragDistance = Vector2.Distance(currentPointerData.position, currentPointerData.pressPosition);
+
+            if (!isDragging && dragDistance > dragThresholdPixels)
+            {
+                isDragging = true;
+                currentPointerData.dragging = true;
+                currentPointerData.eligibleForClick = false;
+
+                ExecuteEvents.Execute(currentDraggedObject, currentPointerData, ExecuteEvents.beginDragHandler);
+            }
+
+            if (isDragging)
+            {
+                ExecuteEvents.Execute(currentDraggedObject, currentPointerData, ExecuteEvents.dragHandler);
+            }
+        }
+
+        // Pointer Up
+        if (triggerUp)
+        {
+            // End drag if we were dragging
+            if (isDragging && currentDraggedObject != null)
+            {
+                ExecuteEvents.Execute(currentDraggedObject, currentPointerData, ExecuteEvents.endDragHandler);
+            }
+
+            // Resolve Pressed Object
+            if (currentPressedObject != null)
+            {
+                // Always call pointer up to reset internal 'pressed' state
+                ExecuteEvents.Execute(currentPressedObject, currentPointerData, ExecuteEvents.pointerUpHandler);
+
+                // Fire click action only if we did NOT drag
+                if (!isDragging && currentPointerData.eligibleForClick)
+                {
+                    Button btn = currentPressedObject.GetComponent<Button>();
+                    if (btn != null && btn.interactable)
+                    {
+                        btn.onClick.Invoke();
+                    }
+                    else
+                    {
+                        ExecuteEvents.Execute(currentPressedObject, currentPointerData, ExecuteEvents.pointerClickHandler);
+                    }
+                }
+
+                // Force button back to Idle/Hover visual state
+                Selectable selectable = currentPressedObject.GetComponent<Selectable>();
+                if (selectable != null)
+                {
+                    selectable.OnPointerExit(currentPointerData);
+                    if (hitUIObject != null && ExecuteEvents.GetEventHandler<IPointerClickHandler>(hitUIObject) == currentPressedObject)
+                    {
+                        selectable.OnPointerEnter(currentPointerData);
+                    }
+                }
+
+                if (EventSystem.current != null)
+                {
+                    EventSystem.current.SetSelectedGameObject(null);
+                }
+            }
+
+            // COMPLETE CLEANUP - prevents phantom drags anywhere on the screen
+            isDragging = false;
+            currentPointerData.dragging = false;
+            currentPointerData.eligibleForClick = false;
+            currentPointerData.pointerPress = null;
+            currentPointerData.rawPointerPress = null;
+            currentPointerData.pointerDrag = null;
+            currentPressedObject = null;
+            currentDraggedObject = null;
+        }
+
+        // Physics 3D Clicks
+        if (hasPhysicsHit && triggerDown && hitUIObject == null)
+        {
+            IPointerClickHandler clickHandler = physicsHit.collider.GetComponent<IPointerClickHandler>();
+            if (clickHandler != null)
+            {
+                PointerEventData eventData = new PointerEventData(EventSystem.current)
+                {
+                    position = new Vector2(physicsHit.textureCoord.x, physicsHit.textureCoord.y)
+                };
+                clickHandler.OnPointerClick(eventData);
+            }
+        }
+
+        bool isInteractive = (hitUIObject != null) || hasPhysicsHit;
         Color targetColor = (triggerPressed && isInteractive) ? clickColor : (isInteractive ? hoverColor : normalColor);
         laserMat.color = targetColor;
         reticleMat.color = targetColor;

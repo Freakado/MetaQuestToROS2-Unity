@@ -2,18 +2,18 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.EventSystems;
 using TMPro;
 using Unity.Robotics.ROSTCPConnector;
 using RosMessageTypes.RclInterfaces;
 
-public class RosOutFeedController : MonoBehaviour
+public class RosOutFeedController : MonoBehaviour, IBeginDragHandler, IEndDragHandler
 {
     [Header("ROS Connection")]
     public ROSConnection rosConnection;
     public string rosOutTopic = "/rosout";
 
     [Header("UI References")]
-    [Tooltip("Target TextMeshProUGUI inside the ScrollRect Content")]
     public TextMeshProUGUI logTextDisplay;
     public ScrollRect logScrollRect;
 
@@ -23,7 +23,6 @@ public class RosOutFeedController : MonoBehaviour
     public Image pauseStatusIndicator;
 
     [Header("Feed Settings")]
-    [Tooltip("Total lines kept in history for scrolling")]
     public int maxHistory = 150;
     public bool showNodeName = true;
     public bool showTimestamp = true;
@@ -31,7 +30,6 @@ public class RosOutFeedController : MonoBehaviour
     [Header("Runtime State")]
     public bool isPaused = false;
 
-    // Severity Levels from rcl_interfaces/msg/Log
     private const byte LOG_DEBUG = 10;
     private const byte LOG_INFO = 20;
     private const byte LOG_WARN = 30;
@@ -42,6 +40,7 @@ public class RosOutFeedController : MonoBehaviour
     private readonly Queue<string> pausedBacklog = new Queue<string>();
     private readonly object lockObject = new object();
     private bool uiDirty = false;
+    private bool isUserDraggingScroll = false;
 
     void Awake()
     {
@@ -71,6 +70,8 @@ public class RosOutFeedController : MonoBehaviour
 
         if (playPauseButton != null)
         {
+            // Remove all existing listeners to prevent double invocation
+            playPauseButton.onClick.RemoveAllListeners();
             playPauseButton.onClick.AddListener(TogglePause);
         }
 
@@ -87,7 +88,6 @@ public class RosOutFeedController : MonoBehaviour
 
     private void OnRosOutReceived(LogMsg msg)
     {
-        // Filter out unity_endpoint self-registration echo chatter
         if (msg.name.Contains("unity_endpoint") && msg.msg.Contains("Publisher already registered"))
             return;
 
@@ -97,7 +97,6 @@ public class RosOutFeedController : MonoBehaviour
         {
             if (isPaused)
             {
-                // Buffer incoming logs so they appear when unpaused
                 pausedBacklog.Enqueue(formattedEntry);
             }
             else
@@ -180,13 +179,17 @@ public class RosOutFeedController : MonoBehaviour
             logTextDisplay.text = fullText;
         }
 
-        // Auto-scroll to bottom only while live playback is running
-        if (!isPaused && logScrollRect != null)
+        // Only snap to bottom if the user is NOT actively dragging the scroll view
+        if (!isPaused && !isUserDraggingScroll && logScrollRect != null)
         {
             Canvas.ForceUpdateCanvases();
             logScrollRect.verticalNormalizedPosition = 0f;
         }
     }
+
+    // Scroll drag callbacks to prevent fighting user thumb/laser dragging
+    public void OnBeginDrag(PointerEventData eventData) => isUserDraggingScroll = true;
+    public void OnEndDrag(PointerEventData eventData) => isUserDraggingScroll = false;
 
     public void TogglePause()
     {
@@ -194,7 +197,6 @@ public class RosOutFeedController : MonoBehaviour
         {
             isPaused = !isPaused;
 
-            // When resuming play mode, dump all accumulated backlog into the visible view
             if (!isPaused)
             {
                 while (pausedBacklog.Count > 0)
