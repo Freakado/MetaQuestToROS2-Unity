@@ -26,6 +26,10 @@ public class VRHandLaserPointer : MonoBehaviour
     public Color hoverColor = new Color(0.1f, 1.0f, 0.4f, 0.9f);
     public Color clickColor = Color.white;
 
+    [Header("Interaction Configuration")]
+    public Camera uiCamera;
+    public float dragThresholdPixels = 12.0f;
+
     private LineRenderer lineRenderer;
     private GameObject reticleDot;
     private Transform reticleTransform;
@@ -34,18 +38,17 @@ public class VRHandLaserPointer : MonoBehaviour
 
     private bool wasPinchingLastFrame = false;
     private Canvas[] worldCanvases;
-    public Camera uiCamera;
 
     // Interaction tracking
     private GameObject currentPressedObject = null;
     private GameObject currentDraggedObject = null;
     private GameObject currentHoveredObject = null;
-    private PointerEventData currentPointerData = null;
+    private PointerEventData pointerData;
     private Vector2 lastScreenPos = Vector2.zero;
     private bool isDragging = false;
-    
-    // Pixel travel needed before turning a click into a scroll drag
-    public float dragThresholdPixels = 12.0f;
+
+    // Cache to eliminate allocations in Update
+    private readonly List<RaycastResult> cachedRaycastResults = new List<RaycastResult>(16);
 
     void Awake()
     {
@@ -83,6 +86,7 @@ public class VRHandLaserPointer : MonoBehaviour
                 uiCamera = Camera.main;
         }
 
+        pointerData = new PointerEventData(EventSystem.current) { pointerId = 1001 };
         RefreshCanvases();
     }
 
@@ -112,33 +116,35 @@ public class VRHandLaserPointer : MonoBehaviour
         SetLaserVisible(true);
         Ray ray = new Ray(originTransform.position, originTransform.forward);
 
-        // Input
-        bool triggerPressed = OVRInput.Get(clickButton, controller) || DetectOpticalPinchHeld() || Input.GetMouseButton(0);
-        bool triggerDown = OVRInput.GetDown(clickButton, controller) || DetectOpticalPinchDown() || Input.GetMouseButtonDown(0);
-        bool triggerUp = OVRInput.GetUp(clickButton, controller) || DetectOpticalPinchUp() || Input.GetMouseButtonUp(0);
+        // --- 1. Frame Input State (Fixed optical pinch evaluation) ---
+        bool pinchHeld = DetectOpticalPinchHeld();
+        bool pinchDown = pinchHeld && !wasPinchingLastFrame;
+        bool pinchUp = !pinchHeld && wasPinchingLastFrame;
+        wasPinchingLastFrame = pinchHeld;
 
-        // 1. Physics Hit Check
+        bool triggerPressed = OVRInput.Get(clickButton, controller) || pinchHeld || Input.GetMouseButton(0);
+        bool triggerDown = OVRInput.GetDown(clickButton, controller) || pinchDown || Input.GetMouseButtonDown(0);
+        bool triggerUp = OVRInput.GetUp(clickButton, controller) || pinchUp || Input.GetMouseButtonUp(0);
+
+        // --- 2. Physics Hit Raycast ---
         bool hasPhysicsHit = Physics.Raycast(ray, out RaycastHit physicsHit, maxDistance, targetLayers);
         float closestDistance = hasPhysicsHit ? physicsHit.distance : maxDistance;
         Vector3 hitPoint = hasPhysicsHit ? physicsHit.point : ray.GetPoint(maxDistance);
         Vector3 hitNormal = hasPhysicsHit ? physicsHit.normal : -ray.direction;
+        IPointerClickHandler physicsClickHandler = hasPhysicsHit ? physicsHit.collider.GetComponent<IPointerClickHandler>() : null;
 
-        // 2. UI Raycast Check
+        // --- 3. UI World Canvas Raycast ---
         GameObject hitUIObject = null;
         RaycastResult topHitResult = default;
 
-        if (currentPointerData == null)
-        {
-            currentPointerData = new PointerEventData(EventSystem.current)
-            {
-                pointerId = 1001
-            };
-        }
+        if (worldCanvases == null || worldCanvases.Length == 0) 
+            RefreshCanvases();
 
-        if (worldCanvases == null || worldCanvases.Length == 0) RefreshCanvases();
+        Camera activeCam = uiCamera != null ? uiCamera : Camera.main;
 
-        foreach (Canvas canvas in worldCanvases)
+        for (int i = 0; i < worldCanvases.Length; i++)
         {
+            Canvas canvas = worldCanvases[i];
             if (canvas == null || !canvas.gameObject.activeInHierarchy || canvas.renderMode != RenderMode.WorldSpace)
                 continue;
 
@@ -155,25 +161,25 @@ public class VRHandLaserPointer : MonoBehaviour
             if (enter > 0 && enter < closestDistance)
             {
                 Vector3 candidatePoint = ray.GetPoint(enter);
-                Camera cam = canvas.worldCamera != null ? canvas.worldCamera : uiCamera;
+                Camera cam = canvas.worldCamera != null ? canvas.worldCamera : activeCam;
                 Vector2 screenPos = RectTransformUtility.WorldToScreenPoint(cam, candidatePoint);
 
-                PointerEventData tempPed = new PointerEventData(EventSystem.current) { position = screenPos };
-                List<RaycastResult> results = new List<RaycastResult>();
-                gr.Raycast(tempPed, results);
+                pointerData.position = screenPos;
+                cachedRaycastResults.Clear();
+                gr.Raycast(pointerData, cachedRaycastResults);
 
-                if (results.Count > 0)
+                if (cachedRaycastResults.Count > 0)
                 {
                     closestDistance = enter;
                     hitPoint = candidatePoint;
                     hitNormal = canvas.transform.forward;
-                    hitUIObject = results[0].gameObject;
-                    topHitResult = results[0];
+                    hitUIObject = cachedRaycastResults[0].gameObject;
+                    topHitResult = cachedRaycastResults[0];
                 }
             }
         }
 
-        // Draw Line & Reticle
+        // --- 4. Render Laser & Reticle ---
         lineRenderer.SetPosition(0, originTransform.position);
         lineRenderer.SetPosition(1, hitPoint);
 
@@ -185,41 +191,38 @@ public class VRHandLaserPointer : MonoBehaviour
             reticleTransform.rotation = Quaternion.LookRotation(hitNormal);
         }
 
-        // 3. UI Interactions
-        Camera activeCam = uiCamera;
+        // --- 5. UI Event Processing ---
         Vector2 currentScreenPos = RectTransformUtility.WorldToScreenPoint(activeCam, hitPoint);
-        
-        currentPointerData.delta = currentScreenPos - lastScreenPos;
-        currentPointerData.position = currentScreenPos;
-        currentPointerData.pointerCurrentRaycast = topHitResult;
+        pointerData.delta = currentScreenPos - lastScreenPos;
+        pointerData.position = currentScreenPos;
+        pointerData.pointerCurrentRaycast = topHitResult;
         lastScreenPos = currentScreenPos;
 
-        // Hover handling
+        // Hover events
         if (hitUIObject != currentHoveredObject && !triggerPressed)
         {
             if (currentHoveredObject != null)
-                ExecuteEvents.Execute(currentHoveredObject, currentPointerData, ExecuteEvents.pointerExitHandler);
+                ExecuteEvents.Execute(currentHoveredObject, pointerData, ExecuteEvents.pointerExitHandler);
 
             currentHoveredObject = hitUIObject;
 
             if (currentHoveredObject != null)
-                ExecuteEvents.Execute(currentHoveredObject, currentPointerData, ExecuteEvents.pointerEnterHandler);
+                ExecuteEvents.Execute(currentHoveredObject, pointerData, ExecuteEvents.pointerEnterHandler);
         }
 
         // Pointer Down
         if (triggerDown)
         {
             isDragging = false;
-            currentPointerData.pressPosition = currentScreenPos;
-            currentPointerData.pointerPressRaycast = topHitResult;
-            currentPointerData.eligibleForClick = true;
+            pointerData.pressPosition = currentScreenPos;
+            pointerData.pointerPressRaycast = topHitResult;
+            pointerData.eligibleForClick = true;
 
             if (hitUIObject != null)
             {
                 GameObject targetBtn = ExecuteEvents.GetEventHandler<IPointerClickHandler>(hitUIObject);
                 GameObject targetDrag = ExecuteEvents.GetEventHandler<IDragHandler>(hitUIObject);
 
-                // If on a button inside a scrollview, prioritize button unless scrolled
                 if (targetDrag == null)
                 {
                     ScrollRect sr = hitUIObject.GetComponentInParent<ScrollRect>();
@@ -227,77 +230,63 @@ public class VRHandLaserPointer : MonoBehaviour
                 }
 
                 currentPressedObject = targetBtn != null ? targetBtn : hitUIObject;
-                currentPointerData.pointerPress = currentPressedObject;
-                currentPointerData.rawPointerPress = hitUIObject;
+                pointerData.pointerPress = currentPressedObject;
+                pointerData.rawPointerPress = hitUIObject;
 
-                ExecuteEvents.Execute(currentPressedObject, currentPointerData, ExecuteEvents.pointerDownHandler);
+                ExecuteEvents.Execute(currentPressedObject, pointerData, ExecuteEvents.pointerDownHandler);
 
                 if (targetDrag != null)
                 {
                     currentDraggedObject = targetDrag;
-                    currentPointerData.pointerDrag = targetDrag;
-                    ExecuteEvents.Execute(currentDraggedObject, currentPointerData, ExecuteEvents.initializePotentialDrag);
+                    pointerData.pointerDrag = targetDrag;
+                    ExecuteEvents.Execute(currentDraggedObject, pointerData, ExecuteEvents.initializePotentialDrag);
                 }
             }
         }
 
-        // Dragging & Scrolling (Only if we actually pressed something scrollable)
+        // Dragging & Scrolling
         if (triggerPressed && currentDraggedObject != null)
         {
-            float dragDistance = Vector2.Distance(currentPointerData.position, currentPointerData.pressPosition);
+            float dragDistance = Vector2.Distance(pointerData.position, pointerData.pressPosition);
 
             if (!isDragging && dragDistance > dragThresholdPixels)
             {
                 isDragging = true;
-                currentPointerData.dragging = true;
-                currentPointerData.eligibleForClick = false;
-
-                ExecuteEvents.Execute(currentDraggedObject, currentPointerData, ExecuteEvents.beginDragHandler);
+                pointerData.dragging = true;
+                pointerData.eligibleForClick = false;
+                ExecuteEvents.Execute(currentDraggedObject, pointerData, ExecuteEvents.beginDragHandler);
             }
 
             if (isDragging)
             {
-                ExecuteEvents.Execute(currentDraggedObject, currentPointerData, ExecuteEvents.dragHandler);
+                ExecuteEvents.Execute(currentDraggedObject, pointerData, ExecuteEvents.dragHandler);
             }
         }
 
-        // Pointer Up
+        // Pointer Up / Click
         if (triggerUp)
         {
-            // End drag if we were dragging
             if (isDragging && currentDraggedObject != null)
             {
-                ExecuteEvents.Execute(currentDraggedObject, currentPointerData, ExecuteEvents.endDragHandler);
+                ExecuteEvents.Execute(currentDraggedObject, pointerData, ExecuteEvents.endDragHandler);
             }
 
-            // Resolve Pressed Object
             if (currentPressedObject != null)
             {
-                // Always call pointer up to reset internal 'pressed' state
-                ExecuteEvents.Execute(currentPressedObject, currentPointerData, ExecuteEvents.pointerUpHandler);
+                ExecuteEvents.Execute(currentPressedObject, pointerData, ExecuteEvents.pointerUpHandler);
 
-                // Fire click action only if we did NOT drag
-                if (!isDragging && currentPointerData.eligibleForClick)
+                if (!isDragging && pointerData.eligibleForClick)
                 {
-                    Button btn = currentPressedObject.GetComponent<Button>();
-                    if (btn != null && btn.interactable)
-                    {
-                        btn.onClick.Invoke();
-                    }
-                    else
-                    {
-                        ExecuteEvents.Execute(currentPressedObject, currentPointerData, ExecuteEvents.pointerClickHandler);
-                    }
+                    ExecuteEvents.Execute(currentPressedObject, pointerData, ExecuteEvents.pointerClickHandler);
                 }
 
-                // Force button back to Idle/Hover visual state
                 Selectable selectable = currentPressedObject.GetComponent<Selectable>();
                 if (selectable != null)
                 {
-                    selectable.OnPointerExit(currentPointerData);
+                    selectable.OnPointerExit(pointerData);
                     if (hitUIObject != null && ExecuteEvents.GetEventHandler<IPointerClickHandler>(hitUIObject) == currentPressedObject)
                     {
-                        selectable.OnPointerEnter(currentPointerData);
+                        selectable.OnPointerEnter(pointerData);
                     }
                 }
 
@@ -307,55 +296,35 @@ public class VRHandLaserPointer : MonoBehaviour
                 }
             }
 
-            // COMPLETE CLEANUP - prevents phantom drags anywhere on the screen
+            // State reset
             isDragging = false;
-            currentPointerData.dragging = false;
-            currentPointerData.eligibleForClick = false;
-            currentPointerData.pointerPress = null;
-            currentPointerData.rawPointerPress = null;
-            currentPointerData.pointerDrag = null;
+            pointerData.dragging = false;
+            pointerData.eligibleForClick = false;
+            pointerData.pointerPress = null;
+            pointerData.rawPointerPress = null;
+            pointerData.pointerDrag = null;
             currentPressedObject = null;
             currentDraggedObject = null;
         }
 
-        // Physics 3D Clicks
-        if (hasPhysicsHit && triggerDown && hitUIObject == null)
+        // --- 6. 3D Physics Clicks ---
+        if (hasPhysicsHit && triggerDown && hitUIObject == null && physicsClickHandler != null)
         {
-            IPointerClickHandler clickHandler = physicsHit.collider.GetComponent<IPointerClickHandler>();
-            if (clickHandler != null)
-            {
-                PointerEventData eventData = new PointerEventData(EventSystem.current)
-                {
-                    position = new Vector2(physicsHit.textureCoord.x, physicsHit.textureCoord.y)
-                };
-                clickHandler.OnPointerClick(eventData);
-            }
+            physicsClickHandler.OnPointerClick(pointerData);
         }
 
-        bool isInteractive = (hitUIObject != null) || hasPhysicsHit;
+        // --- 7. Laser Coloring ---
+        bool isInteractive = (hitUIObject != null) || (hasPhysicsHit && physicsClickHandler != null);
         Color targetColor = (triggerPressed && isInteractive) ? clickColor : (isInteractive ? hoverColor : normalColor);
         laserMat.color = targetColor;
         reticleMat.color = targetColor;
-    }
-
-    private bool DetectOpticalPinchDown()
-    {
-        bool isPinchingNow = DetectOpticalPinchHeld();
-        bool pinchDown = isPinchingNow && !wasPinchingLastFrame;
-        wasPinchingLastFrame = isPinchingNow;
-        return pinchDown;
-    }
-
-    private bool DetectOpticalPinchUp()
-    {
-        bool isPinchingNow = DetectOpticalPinchHeld();
-        return !isPinchingNow && wasPinchingLastFrame;
     }
 
     private bool DetectOpticalPinchHeld()
     {
         if (ovrHand != null && ovrHand.IsTracked)
             return ovrHand.GetFingerIsPinching(OVRHand.HandFinger.Index);
+
         return OVRInput.Get(OVRInput.Button.One, OVRInput.Controller.RHand);
     }
 
